@@ -21,3 +21,4 @@ npm-debug.log*
 data/*.db
 data/*.db-*
 data/secret.txt
+.vercel
