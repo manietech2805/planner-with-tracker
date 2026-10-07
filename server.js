@@ -74,19 +74,27 @@ app.use("/api", apiRouter);
 
 
 // Start server
-connectDB()
-  .then(() => {
+async function startServer() {
+  try {
+    await connectDB();
+
     app.listen(PORT, () => {
       console.log(
         `Cadence is running at http://localhost:${PORT}`
       );
     });
-  })
-  .catch((err) => {
+  } catch (err) {
     console.error(
       "MongoDB connection failed:",
       err
     );
 
     process.exit(1);
-  });
+  }
+}
+
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = app;
