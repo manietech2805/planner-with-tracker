@@ -1,48 +1,92 @@
+require("dotenv").config();
+
 const express = require("express");
+const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
-const path = require("path");
-const db = require("./db");
+const rateLimit = require("express-rate-limit");
+
+const { connectDB, getDB } = require("./db");
 const { router: authRouter } = require("./auth");
 const apiRouter = require("./api");
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
 
-app.use(express.json({ limit: "5mb" }));
+
+// Security
+app.use(helmet());
+
+app.use(
+  rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false
+  })
+);
+
+
+// Middleware
+app.use(express.json({
+  limit: "1mb"
+}));
+
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/api/health", (req, res) => {
-  const tables = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    .all()
-    .map(row => row.name);
 
-  res.json({ ok: true, time: new Date().toISOString(), tables });
+// Frontend
+app.use(express.static("public"));
+
+
+// Health check
+app.get("/api/health", async (req, res) => {
+  try {
+    const database = getDB();
+
+    await database.command({
+      ping: 1
+    });
+
+    res.json({
+      ok: true,
+      time: new Date().toISOString(),
+      database: "MongoDB"
+    });
+
+  } catch (err) {
+    console.error(err);
+
+    res.status(500).json({
+      ok: false,
+      error: "Database unavailable"
+    });
+  }
 });
 
+
+// Authentication
 app.use("/api/auth", authRouter);
+
+
+// Main API
 app.use("/api", apiRouter);
 
-app.use("/api", (req, res) => {
-  res.status(404).json({ error: "Not found" });
-});
 
-// Catches any error so the server never shows its insides
-app.use((err, req, res, next) => {
-  if (err.status) {
-    return res.status(err.status).json({ error: err.message });
-  }
-  if (err.type === "entity.parse.failed") {
-    return res.status(400).json({ error: "That request wasn't valid JSON" });
-  }
-  if (err.type === "entity.too.large") {
-    return res.status(413).json({ error: "That request is too big" });
-  }
-  console.error(err);
-  res.status(500).json({ error: "Something went wrong" });
-});
+// Start server
+connectDB()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(
+        `Cadence is running at http://localhost:${PORT}`
+      );
+    });
+  })
+  .catch((err) => {
+    console.error(
+      "MongoDB connection failed:",
+      err
+    );
 
-app.listen(PORT, () => {
-  console.log(`Cadence is running at http://localhost:${PORT}`);
-});
+    process.exit(1);
+  });

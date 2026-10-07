@@ -1,67 +1,66 @@
-const Database = require("better-sqlite3");
-const fs = require("fs");
-const path = require("path");
+require("dotenv").config();
 
-// The database file lives in a "data" folder (created automatically)
-const dataDir = path.join(__dirname, "data");
-fs.mkdirSync(dataDir, { recursive: true });
+const { MongoClient } = require("mongodb");
 
-const db = new Database(path.join(dataDir, "cadence.db"));
+const uri = process.env.MONGODB_URI;
 
-db.pragma("journal_mode = WAL");   // faster, safer writes
-db.pragma("foreign_keys = ON");    // deleting a user also deletes their data
+if (!uri) {
+  throw new Error("MONGODB_URI is not set in .env");
+}
 
-// Create the tables the first time the server starts
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    email         TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,
-    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+const client = new MongoClient(uri);
+
+let db;
+
+
+async function connectDB() {
+  if (db) return db;
+
+  await client.connect();
+
+  db = client.db(
+    process.env.MONGODB_DB || "cadence"
   );
 
-  CREATE TABLE IF NOT EXISTS tasks (
-    id          TEXT    NOT NULL,
-    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title       TEXT    NOT NULL,
-    date        TEXT    NOT NULL DEFAULT '',
-    est         INTEGER NOT NULL DEFAULT 30,
-    done        INTEGER NOT NULL DEFAULT 0,
-    focused_ms  INTEGER NOT NULL DEFAULT 0,
-    sample      INTEGER NOT NULL DEFAULT 0,
-    updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, id)
+  // Create required indexes
+  await db.collection("users").createIndex(
+    { email: 1 },
+    { unique: true }
   );
 
-  CREATE INDEX IF NOT EXISTS idx_tasks_user_date ON tasks (user_id, date);
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    id             TEXT    NOT NULL,
-    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    task_id        TEXT    NOT NULL DEFAULT '',
-    started_at     INTEGER NOT NULL,
-    ended_at       INTEGER NOT NULL,
-    focused_ms     INTEGER NOT NULL,
-    paused_ms      INTEGER NOT NULL DEFAULT 0,
-    planned_ms     INTEGER NOT NULL DEFAULT 0,
-    completed      INTEGER NOT NULL DEFAULT 0,
-    segs           TEXT    NOT NULL DEFAULT '[]',
-    pauses         TEXT    NOT NULL DEFAULT '{}',
-    sensors        TEXT    NOT NULL DEFAULT '{}',
-    noise_avg      INTEGER,
-    screen_active  INTEGER,
-    presence       INTEGER,
-    sample         INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, id)
+  await db.collection("tasks").createIndex(
+    { user_id: 1, id: 1 },
+    { unique: true }
   );
 
-  CREATE INDEX IF NOT EXISTS idx_sessions_user_start ON sessions (user_id, started_at);
-
-  CREATE TABLE IF NOT EXISTS settings (
-    user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    data        TEXT    NOT NULL DEFAULT '{}',
-    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  await db.collection("sessions").createIndex(
+    { user_id: 1, id: 1 },
+    { unique: true }
   );
-`);
 
-module.exports = db;
+  await db.collection("settings").createIndex(
+    { user_id: 1 },
+    { unique: true }
+  );
+
+  console.log("MongoDB Atlas connected");
+
+  return db;
+}
+
+
+function getDB() {
+  if (!db) {
+    throw new Error(
+      "MongoDB is not connected. Call connectDB() first."
+    );
+  }
+
+  return db;
+}
+
+
+module.exports = {
+  connectDB,
+  getDB
+};
